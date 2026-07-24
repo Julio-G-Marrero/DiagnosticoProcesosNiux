@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+*.user
+
+# Contiene credenciales reales de las bases Firebird - nunca subir a git.
+appsettings.Development.json

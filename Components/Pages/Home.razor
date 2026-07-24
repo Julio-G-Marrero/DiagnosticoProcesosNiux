@@ -1,0 +1,289 @@
+@page "/"
+@using ExistenciasReset.Models
+
+<PageTitle>Reinicio Existencias al Día</PageTitle>
+
+<div class="container" style="max-width: 1200px;">
+    <p class="text-muted">
+        Reconstruye la llave primaria de <code>EXISTENCIAS_INICIO_DIA</code> cuando el módulo
+        "Existencias al Día" de NiuX falla con <code>EAccessViolation</code>.
+    </p>
+
+    <div class="mb-3">
+        <label class="form-label" for="tenantSelect">Sistema</label>
+        <select id="tenantSelect" class="form-select" value="@SelectedTenantId" disabled="@IsRunning"
+                @onchange="OnTenantChanged">
+            <option value="">-- Selecciona un sistema --</option>
+            @foreach (var tenant in ActiveTenants)
+            {
+                <option value="@tenant.Id">@tenant.Name (@tenant.Id)</option>
+            }
+        </select>
+    </div>
+
+    @if (SelectedTenant is not null)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3">Host</dt>
+                    <dd class="col-sm-9">@SelectedTenant.Domain</dd>
+                    <dt class="col-sm-3">Base de datos</dt>
+                    <dd class="col-sm-9">@DatabasePath</dd>
+                </dl>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 mb-0">Diagnóstico en vivo</h2>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@IsDiagnosing" @onclick="LoadDiagnosticsAsync">
+                @if (IsDiagnosing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+        </div>
+
+        @if (Diagnostics is not null && Diagnostics.ErrorMessage != string.Empty)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle-fill me-2"></i>
+                No se pudo diagnosticar este sistema (¿tiene el esquema de inventario "SISTCRASH"?): @Diagnostics.ErrorMessage
+            </div>
+        }
+        else if (Diagnostics is not null)
+        {
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-muted small">Llave primaria</div>
+                            @if (Diagnostics.HasPrimaryKey)
+                            {
+                                <div class="text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>Existe (@Diagnostics.ConstraintName)</div>
+                            }
+                            else
+                            {
+                                <div class="text-danger fw-semibold"><i class="bi bi-x-circle-fill me-1"></i>No existe</div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-muted small">Filas actuales</div>
+                            <div class="fw-semibold">@Diagnostics.RowCount</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="text-muted small">Conexiones activas</div>
+                            <div class="fw-semibold @(Diagnostics.ActiveAttachments.Count > 0 ? "text-warning" : "text-success")">
+                                @Diagnostics.ActiveAttachments.Count
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @if (Diagnostics.ActiveAttachments.Count > 0)
+            {
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Hay @Diagnostics.ActiveAttachments.Count conexión(es) activa(s). Si alguna tiene abierta la pantalla
+                    de Existencias/Inventario, el reinicio puede fallar por bloqueo de la tabla. Pide que la cierren,
+                    o fuerza la desconexión abajo si es una sesión perdida.
+                </div>
+
+                @if (StaleAttachmentCount > 0)
+                {
+                    <div class="mb-3">
+                        @if (PendingBulkDisconnect)
+                        {
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                Vas a desconectar <strong>@StaleAttachmentCount</strong> conexión(es) de días anteriores a hoy. Esto corta esas sesiones de inmediato.
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-danger me-2" @onclick="ConfirmBulkDisconnectAsync">Sí, desconectar @StaleAttachmentCount conexiones</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="CancelBulkDisconnect">Cancelar</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-danger btn-sm" @onclick="RequestBulkDisconnect">
+                                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                Desconectar @StaleAttachmentCount conexión(es) de días anteriores
+                            </button>
+                        }
+                    </div>
+                }
+
+                <div class="table-responsive mb-3" style="overflow-x: auto;">
+                    <table class="table table-sm table-bordered align-middle mb-0" style="min-width: 720px;">
+                        <thead>
+                            <tr>
+                                <th style="max-width: 220px;">Proceso</th>
+                                <th>PID</th>
+                                <th style="max-width: 140px;">IP</th>
+                                <th class="text-nowrap">Conectado</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var attachment in Diagnostics.ActiveAttachments)
+                            {
+                                <tr>
+                                    <td class="text-truncate" style="max-width: 220px;" title="@attachment.RemoteProcess">@attachment.RemoteProcess</td>
+                                    <td>@attachment.RemotePid</td>
+                                    <td class="text-truncate" style="max-width: 140px;" title="@attachment.RemoteAddress">@attachment.RemoteAddress</td>
+                                    <td class="text-nowrap small">@attachment.ConnectedAt.ToString("dd/MM HH:mm")</td>
+                                    <td class="text-nowrap">
+                                        @if (PendingDisconnectId == attachment.Id)
+                                        {
+                                            <button class="btn btn-sm btn-danger" @onclick="() => ConfirmForceDisconnectAsync(attachment.Id)">
+                                                <i class="bi bi-exclamation-triangle-fill me-1"></i>¿Seguro?
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="CancelForceDisconnect">Cancelar</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RequestForceDisconnect(attachment.Id)">
+                                                Forzar desconexión
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
+            @if (ActiveStatements.Count > 0)
+            {
+                <h3 class="h6">Consultas/procedimientos ejecutándose ahora mismo</h3>
+                <div class="table-responsive mb-3" style="overflow-x: auto;">
+                    <table class="table table-sm table-bordered align-middle mb-0" style="min-width: 820px;">
+                        <thead>
+                            <tr>
+                                <th style="max-width: 200px;">Proceso</th>
+                                <th>PID</th>
+                                <th style="max-width: 160px;">Procedimiento / línea</th>
+                                <th style="max-width: 260px;">SQL</th>
+                                <th class="text-nowrap">Segundos</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var statement in ActiveStatements)
+                            {
+                                <tr class="@(statement.SecondsRunning > 60 ? "table-warning" : "")">
+                                    <td class="text-truncate" style="max-width: 200px;" title="@statement.RemoteProcess">@statement.RemoteProcess</td>
+                                    <td>@statement.RemotePid</td>
+                                    <td class="text-truncate" style="max-width: 160px;">@(statement.ProcedureName == string.Empty ? "-" : $"{statement.ProcedureName} (línea {statement.ProcedureLine})")</td>
+                                    <td class="text-truncate" style="max-width: 260px;" title="@statement.Sql"><code class="small">@statement.Sql</code></td>
+                                    <td>@statement.SecondsRunning</td>
+                                    <td>
+                                        @if (PendingCancelStatementId == statement.Id)
+                                        {
+                                            <button class="btn btn-sm btn-danger" @onclick="() => ConfirmCancelStatementAsync(statement.Id)">
+                                                <i class="bi bi-exclamation-triangle-fill me-1"></i>¿Seguro?
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="DismissCancelStatement">Cancelar</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-warning" @onclick="() => RequestCancelStatement(statement.Id)">
+                                                Cancelar consulta
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        @if (Diagnostics is not null && Diagnostics.ErrorMessage == string.Empty)
+        {
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" id="confirmBackup" checked="@ConfirmedBackup"
+                       disabled="@IsRunning" @onchange="OnConfirmedBackupChanged" />
+                <label class="form-check-label" for="confirmBackup">
+                    Confirmo que ya respaldé este sistema y que no hay usuarios en el módulo de Inventario.
+                </label>
+            </div>
+
+            <button class="btn btn-danger" disabled="@(!ConfirmedBackup || IsRunning)" @onclick="RunResetAsync">
+                @if (IsRunning)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    <text>Reiniciando...</text>
+                }
+                else
+                {
+                    <i class="bi bi-arrow-repeat me-2"></i>
+                    <text>Reiniciar generación de existencias al día</text>
+                }
+            </button>
+        }
+    }
+
+    @if (Steps.Count > 0)
+    {
+        <hr class="my-4" />
+        <h2 class="h5">Detalle de la ejecución</h2>
+        <ul class="list-group mb-3">
+            @foreach (var step in Steps)
+            {
+                <li class="list-group-item d-flex justify-content-between align-items-start @(step.Success ? "" : "list-group-item-danger")">
+                    <div>
+                        <div class="fw-semibold">@step.Name</div>
+                        <div class="text-muted small">@step.Message</div>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge @(step.Success ? "bg-success" : "bg-danger") rounded-pill">
+                            @(step.Success ? "OK" : "ERROR")
+                        </span>
+                        <div class="text-muted small mt-1">@FormatDuration(step.DurationMs)</div>
+                    </div>
+                </li>
+            }
+        </ul>
+
+        @if (Result is not null)
+        {
+            <p class="text-muted small">Tiempo total: <strong>@FormatDuration(Result.TotalDurationMs)</strong></p>
+
+            @if (Result.Success)
+            {
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle-fill me-2"></i>
+                    Reinicio completado. Existencias generadas: <strong>@Result.TotalGenerado</strong>.
+                    Ahora abre el módulo de Existencias al Día en NiuX para validar.
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle-fill me-2"></i>
+                    El reinicio falló: @Result.ErrorMessage
+                </div>
+
+                @if (ErrorHint != string.Empty)
+                {
+                    <div class="alert alert-info">
+                        <i class="bi bi-lightbulb-fill me-2"></i>@ErrorHint
+                    </div>
+                }
+            }
+        }
+    }
+</div>
