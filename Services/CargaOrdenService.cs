@@ -85,12 +85,28 @@ public class CargaOrdenService(ILogger<CargaOrdenService> logger)
         {
             issues.Add(new CargaOrdenIssue(
                 Convert.ToInt32(reader.GetValue(0)),
-                reader.GetValue(1)?.ToString()?.Trim() ?? string.Empty,
+                FormatFechaStr(reader.GetValue(1)?.ToString()),
                 reader.GetValue(2)?.ToString()?.Trim() ?? string.Empty,
                 reader.IsDBNull(3) ? null : reader.GetValue(3).ToString()?.Trim(),
                 reader.IsDBNull(4) ? null : reader.GetValue(4).ToString()?.Trim()));
         }
 
         return issues;
+    }
+
+    private static string FormatFechaStr(string? raw)
+    {
+        raw = raw?.Trim() ?? string.Empty;
+
+        var formatted = raw;
+
+        if (raw.Length == 12 &&
+            DateTime.TryParseExact(raw, "yyyyMMddHHmm", null,
+                System.Globalization.DateTimeStyles.None, out var fecha))
+        {
+            formatted = fecha.ToString("dd/MM/yyyy HH:mm");
+        }
+
+        return formatted;
     }
 }
