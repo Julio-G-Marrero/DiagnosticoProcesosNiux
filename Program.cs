@@ -12,6 +12,7 @@ var tenants = builder.Configuration.GetSection("Tenants").Get<List<TenantOptions
 builder.Services.AddSingleton<IReadOnlyList<TenantOptions>>(tenants);
 builder.Services.AddScoped<FirebirdMonitoringService>();
 builder.Services.AddScoped<ExistenciasResetService>();
+builder.Services.AddScoped<CargaOrdenService>();
 
 var app = builder.Build();
 

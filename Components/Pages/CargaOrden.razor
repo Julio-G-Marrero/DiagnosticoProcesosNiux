@@ -1,0 +1,213 @@
+@page "/carga-orden"
+@using ExistenciasReset.Models
+
+<PageTitle>Diagnóstico CARGA_A_ORDEN</PageTitle>
+
+<div class="container" style="max-width: 1200px;">
+    <p class="text-muted">
+        Detecta valores no numéricos en <code>NOTAS_VTA.CARGA_A_ORDEN</code> / <code>CARGA_A_EMP</code>.
+        Estos son los que hacen tronar <code>ANALIZA_COSTOS_RANGO</code> y <code>ANALIZA_COSTOS_RANGO_17</code>
+        con el error de conversión de cadena a entero.
+    </p>
+
+    <div class="mb-3">
+        <label class="form-label" for="tenantSelect">Sistema</label>
+        <select id="tenantSelect" class="form-select" value="@SelectedTenantId" disabled="@IsFixing"
+                @onchange="OnTenantChanged">
+            <option value="">-- Selecciona un sistema --</option>
+            @foreach (var tenant in ActiveTenants)
+            {
+                <option value="@tenant.Id">@tenant.Name (@tenant.Id)</option>
+            }
+        </select>
+    </div>
+
+    @if (SelectedTenant is not null)
+    {
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 mb-0">Diagnóstico en vivo</h2>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@IsDiagnosing" @onclick="LoadDiagnosticsAsync">
+                @if (IsDiagnosing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+        </div>
+
+        @if (Diagnostics is not null && Diagnostics.ErrorMessage != string.Empty)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle-fill me-2"></i>
+                No se pudo diagnosticar este sistema: @Diagnostics.ErrorMessage
+            </div>
+        }
+        else if (Diagnostics is not null)
+        {
+            @if (LastFixResult is not null)
+            {
+                <div class="alert @(LastFixResult.Success ? "alert-success" : "alert-danger")">
+                    @if (LastFixResult.Success)
+                    {
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                    }
+                    else
+                    {
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                    }
+                    @LastFixResult.Message
+                </div>
+            }
+
+            <!-- CARGA_A_ORDEN -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">CARGA_A_ORDEN</h3>
+                        <span class="badge @(Diagnostics.OrdenIssues.Count > 0 ? "bg-danger" : "bg-success") rounded-pill">
+                            @Diagnostics.OrdenIssues.Count valor(es) no numérico(s)
+                        </span>
+                    </div>
+
+                    @if (Diagnostics.OrdenIssues.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin valores problemáticos.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive mb-3" style="max-height: 320px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Folio</th>
+                                        <th>Fecha</th>
+                                        <th>Usuario</th>
+                                        <th>CARGA_A_ORDEN</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var issue in Diagnostics.OrdenIssues)
+                                    {
+                                        <tr>
+                                            <td>@issue.Folio</td>
+                                            <td class="text-nowrap small">@issue.FechaStr</td>
+                                            <td>@issue.Usuario</td>
+                                            <td><code>@issue.CargaAOrden</code></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (PendingFixOrden)
+                        {
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                Vas a poner en <strong>NULL</strong> el campo <code>CARGA_A_ORDEN</code> de los
+                                <strong>@Diagnostics.OrdenIssues.Count</strong> registro(s) de arriba. Esta acción escribe
+                                directo en producción y no se puede deshacer.
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-danger me-2" disabled="@IsFixing" @onclick="ConfirmFixOrdenAsync">
+                                        @if (IsFixing)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                        }
+                                        Sí, poner en NULL
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsFixing" @onclick="CancelFixOrden">Cancelar</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="RequestFixOrden">
+                                <i class="bi bi-eraser-fill me-1"></i>Poner en NULL los @Diagnostics.OrdenIssues.Count valor(es)
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+
+            <!-- CARGA_A_EMP -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">CARGA_A_EMP</h3>
+                        <span class="badge @(Diagnostics.EmpIssues.Count > 0 ? "bg-warning text-dark" : "bg-success") rounded-pill">
+                            @Diagnostics.EmpIssues.Count valor(es) no numérico(s)
+                        </span>
+                    </div>
+
+                    <p class="text-muted small">
+                        Ojo: en algunas sucursales este campo se usa a propósito para códigos de aseguradora o nombres
+                        de empleado. Revisa la lista antes de limpiar — no asumas que todo es un error de captura.
+                    </p>
+
+                    @if (Diagnostics.EmpIssues.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin valores problemáticos.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive mb-3" style="max-height: 320px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Folio</th>
+                                        <th>Fecha</th>
+                                        <th>Usuario</th>
+                                        <th>CARGA_A_EMP</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var issue in Diagnostics.EmpIssues)
+                                    {
+                                        <tr>
+                                            <td>@issue.Folio</td>
+                                            <td class="text-nowrap small">@issue.FechaStr</td>
+                                            <td>@issue.Usuario</td>
+                                            <td><code>@issue.CargaAEmp</code></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (PendingFixEmp)
+                        {
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                Vas a poner en <strong>NULL</strong> el campo <code>CARGA_A_EMP</code> de los
+                                <strong>@Diagnostics.EmpIssues.Count</strong> registro(s) de arriba. Esta acción escribe
+                                directo en producción y no se puede deshacer.
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-danger me-2" disabled="@IsFixing" @onclick="ConfirmFixEmpAsync">
+                                        @if (IsFixing)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                        }
+                                        Sí, poner en NULL
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsFixing" @onclick="CancelFixEmp">Cancelar</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-warning" @onclick="RequestFixEmp">
+                                <i class="bi bi-eraser-fill me-1"></i>Poner en NULL los @Diagnostics.EmpIssues.Count valor(es)
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                Esto limpia lo ya capturado, pero NiuX sigue sin validar este campo al escribirlo — puede volver a
+                pasar. Revisa esta pantalla periódicamente, o pide el cambio en el formulario de captura de Delphi
+                para bloquearlo de raíz.
+            </div>
+        }
+    }
+</div>
