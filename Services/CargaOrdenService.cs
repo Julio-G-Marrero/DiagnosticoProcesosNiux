@@ -5,11 +5,14 @@ namespace ExistenciasReset.Services;
 
 public class CargaOrdenService(ILogger<CargaOrdenService> logger)
 {
+    // OJO: no excluir TRIM(...) <> '' aqui. CAST('' AS INTEGER) truena exactamente
+    // igual que con texto no numerico ("conversion error from string \"\"") - una
+    // cadena vacia NO es un valor seguro, solo NULL lo es.
     private const string OrdenIssueFilter =
-        "CARGA_A_ORDEN IS NOT NULL AND TRIM(CARGA_A_ORDEN) <> '' AND TRIM(CARGA_A_ORDEN) NOT SIMILAR TO '[0-9]+'";
+        "CARGA_A_ORDEN IS NOT NULL AND TRIM(CARGA_A_ORDEN) NOT SIMILAR TO '[0-9]+'";
 
     private const string EmpIssueFilter =
-        "CARGA_A_EMP IS NOT NULL AND TRIM(CARGA_A_EMP) <> '' AND TRIM(CARGA_A_EMP) NOT SIMILAR TO '[0-9]+'";
+        "CARGA_A_EMP IS NOT NULL AND TRIM(CARGA_A_EMP) NOT SIMILAR TO '[0-9]+'";
 
     public async Task<CargaOrdenDiagnostics> DiagnoseAsync(TenantOptions tenant, CancellationToken cancellationToken)
     {

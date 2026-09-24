@@ -92,7 +92,16 @@
                                             <td>@issue.Folio</td>
                                             <td class="text-nowrap small">@issue.FechaStr</td>
                                             <td>@issue.Usuario</td>
-                                            <td><code>@issue.CargaAOrden</code></td>
+                                            <td>
+                                                @if (string.IsNullOrEmpty(issue.CargaAOrden))
+                                                {
+                                                    <em class="text-muted">(vacío)</em>
+                                                }
+                                                else
+                                                {
+                                                    <code>@issue.CargaAOrden</code>
+                                                }
+                                            </td>
                                         </tr>
                                     }
                                 </tbody>
@@ -166,7 +175,16 @@
                                             <td>@issue.Folio</td>
                                             <td class="text-nowrap small">@issue.FechaStr</td>
                                             <td>@issue.Usuario</td>
-                                            <td><code>@issue.CargaAEmp</code></td>
+                                            <td>
+                                                @if (string.IsNullOrEmpty(issue.CargaAEmp))
+                                                {
+                                                    <em class="text-muted">(vacío)</em>
+                                                }
+                                                else
+                                                {
+                                                    <code>@issue.CargaAEmp</code>
+                                                }
+                                            </td>
                                         </tr>
                                     }
                                 </tbody>
