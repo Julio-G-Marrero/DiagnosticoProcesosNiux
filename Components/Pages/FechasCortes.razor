@@ -1,0 +1,241 @@
+@page "/fechas-cortes"
+@using ExistenciasReset.Models
+
+<PageTitle>Diagnóstico Fechas y Cortes</PageTitle>
+
+<div class="container" style="max-width: 1200px;">
+    <p class="text-muted">
+        Detecta el síntoma de "el ticket se guardó con otra fecha / el pago cayó en otra caja": instancias de NiuX
+        abiertas por días, tickets cuya <code>FECHA</code> no coincide con el día en que se cobraron, pagos que
+        quedaron en una fecha o caja equivocada, y cortes cuyo resumen no coincide con los movimientos.
+        Solo consulta, no modifica nada.
+    </p>
+
+    <div class="row mb-3">
+        <div class="col-md-8">
+            <label class="form-label" for="tenantSelect">Sistema</label>
+            <select id="tenantSelect" class="form-select" value="@SelectedTenantId" @onchange="OnTenantChanged">
+                <option value="">-- Selecciona un sistema --</option>
+                @foreach (var tenant in ActiveTenants)
+                {
+                    <option value="@tenant.Id">@tenant.Name (@tenant.Id)</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="diasSelect">Revisar los últimos</label>
+            <select id="diasSelect" class="form-select" value="@Dias" @onchange="OnDiasChanged">
+                <option value="14">14 días</option>
+                <option value="30">30 días</option>
+                <option value="60">60 días</option>
+                <option value="90">90 días</option>
+            </select>
+        </div>
+    </div>
+
+    @if (SelectedTenant is not null)
+    {
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 mb-0">Diagnóstico en vivo</h2>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@IsDiagnosing" @onclick="LoadDiagnosticsAsync">
+                @if (IsDiagnosing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+        </div>
+
+        @if (IsDiagnosing && Diagnostics is null)
+        {
+            <p class="text-muted"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Consultando...</p>
+        }
+        else if (Diagnostics is not null && Diagnostics.ErrorMessage != string.Empty)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle-fill me-2"></i>No se pudo diagnosticar este sistema: @Diagnostics.ErrorMessage
+            </div>
+        }
+        else if (Diagnostics is not null)
+        {
+            <!-- 1. Instancias de NiuX abiertas por días -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">1. NiuX abierto desde días anteriores</h3>
+                        <span class="badge @(Diagnostics.Instancias.Count > 0 ? "bg-danger" : "bg-success") rounded-pill">@Diagnostics.Instancias.Count</span>
+                    </div>
+                    <p class="text-muted small mb-2">
+                        Un NiuX que no se cierra al terminar el día puede seguir usando la fecha (y la caja) con la que arrancó.
+                    </p>
+                    @if (Diagnostics.Instancias.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>No hay NiuX abiertos desde días anteriores.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle mb-2">
+                                <thead>
+                                    <tr><th>PID</th><th>Programa</th><th>PC (dirección)</th><th>Conectado desde</th><th>Días abierto</th><th>Conexiones</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var i in Diagnostics.Instancias)
+                                    {
+                                        <tr>
+                                            <td>@i.Pid</td>
+                                            <td class="small">@i.Proceso</td>
+                                            <td class="small">@i.Direccion</td>
+                                            <td class="text-nowrap small">@i.Desde.ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td><strong>@i.DiasAbierta</strong></td>
+                                            <td>@i.Conexiones</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <a class="btn btn-sm btn-outline-secondary" href="/?tenant=@SelectedTenantId">
+                            Ver conexiones y desconectar (pantalla Reinicio)
+                        </a>
+                    }
+                </div>
+            </div>
+
+            <!-- 2. Tickets con FECHA distinta al día del cobro -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">2. Tickets con <code>FECHA</code> distinta al día del cobro</h3>
+                        <span class="badge @(Diagnostics.Tickets.Count > 0 ? "bg-danger" : "bg-success") rounded-pill">@Diagnostics.Tickets.Count</span>
+                    </div>
+                    <p class="text-muted small mb-2">
+                        <code>FECHA</code> es la que usa Consulta Ventas; <code>HORA</code> es la hora real del cobro. Un borrador cobrado
+                        días después también aparece aquí de forma legítima: revisa si <code>FECHA2</code> coincide con <code>FECHA</code>.
+                    </p>
+                    @if (Diagnostics.Tickets.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin casos.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr><th>Folio</th><th>FECHA (ventas)</th><th>FECHA2 (creación)</th><th>HORA del cobro</th><th>Días de atraso</th><th>Usuario</th><th class="text-end">Total</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var t in Diagnostics.Tickets)
+                                    {
+                                        <tr>
+                                            <td>@t.Folio</td>
+                                            <td class="text-danger">@t.Fecha.ToString("dd/MM/yyyy")</td>
+                                            <td>@(t.Fecha2?.ToString("dd/MM/yyyy"))</td>
+                                            <td class="text-nowrap small">@t.Hora.ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td>@t.DiasAtraso</td>
+                                            <td>@t.Usuario</td>
+                                            <td class="text-end">@(t.Total.HasValue ? Dinero(t.Total.Value) : "")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- 3. Pagos mal asignados -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">3. Pagos con fecha o caja equivocada</h3>
+                        <span class="badge @(Diagnostics.Pagos.Count > 0 ? "bg-danger" : "bg-success") rounded-pill">@Diagnostics.Pagos.Count</span>
+                    </div>
+                    <p class="text-muted small mb-2">
+                        Pagos de punto de venta cuya fecha no es la del día del cobro, o que se registraron en una caja que ya estaba cerrada.
+                        Estos movimientos hacen que el corte de un día salga con sobrante y el de otro con faltante.
+                    </p>
+                    @if (Diagnostics.Pagos.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin casos.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 360px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr><th>Folio</th><th>Fecha del pago</th><th>Cobro real</th><th>Caja</th><th>Método</th><th class="text-end">Importe</th><th>Motivo</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in Diagnostics.Pagos)
+                                    {
+                                        <tr>
+                                            <td>@p.Folio</td>
+                                            <td class="text-danger">@p.FechaPago.ToString("dd/MM/yyyy")</td>
+                                            <td class="text-nowrap small">@p.HoraCobro.ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td>@p.Caja</td>
+                                            <td>@p.TipoPago</td>
+                                            <td class="text-end">@Dinero(p.Importe)</td>
+                                            <td class="small">@p.Motivo</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- 4. Cortes -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">4. Cortes de caja con señales de problema</h3>
+                        <span class="badge @(Diagnostics.Cortes.Count > 0 ? "bg-warning text-dark" : "bg-success") rounded-pill">@Diagnostics.Cortes.Count</span>
+                    </div>
+                    <p class="text-muted small mb-2">
+                        Compara el resumen que se guardó al cerrar cada caja contra los movimientos reales, y el efectivo contado contra
+                        el esperado (fondo + ventas en efectivo del resumen). "Dif. movs" ≠ 0 significa que entraron pagos a esa caja después de su corte.
+                    </p>
+                    @if (Diagnostics.Cortes.Count == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin casos.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Caja</th><th>Abre → cierra</th><th class="text-end">Efvo. esperado</th><th class="text-end">Efvo. contado</th>
+                                        <th class="text-end">Dif. conteo</th><th class="text-end">Dif. movs efvo.</th><th class="text-end">Dif. movs tarjeta</th><th>Motivos</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var c in Diagnostics.Cortes)
+                                    {
+                                        <tr>
+                                            <td>#@c.Caja<br /><span class="text-muted small">@c.Usuario</span></td>
+                                            <td class="text-nowrap small">@c.Apertura.ToString("dd/MM HH:mm") →<br />@(c.Cierre?.ToString("dd/MM HH:mm") ?? "abierta")</td>
+                                            <td class="text-end">@Dinero(c.EfectivoEsperado)</td>
+                                            <td class="text-end">@Dinero(c.EfectivoContado)</td>
+                                            <td class="text-end @(Math.Abs(c.DifConteo) >= 50 ? "text-danger" : "")">@(c.Abierta ? "" : Signo(c.DifConteo))</td>
+                                            <td class="text-end @(Math.Abs(c.DifEfectivoMovimientos) > 1 ? "text-danger fw-semibold" : "")">@Signo(c.DifEfectivoMovimientos)</td>
+                                            <td class="text-end @(Math.Abs(c.DifTarjetaMovimientos) > 1 ? "text-danger fw-semibold" : "")">@Signo(c.DifTarjetaMovimientos)</td>
+                                            <td class="small">@c.Motivos@(c.Observaciones == string.Empty ? "" : $" — Nota: {c.Observaciones}")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                Si aparece algo en 1, 2 y 3 al mismo tiempo, lo más probable es que un NiuX abierto por días siga cobrando con la fecha y la
+                caja con las que arrancó: ciérralo y vuelve a abrirlo, y revisa el corte del día afectado contra el de la caja que recibió los pagos.
+            </div>
+        }
+    }
+</div>

@@ -1,0 +1,150 @@
+@page "/fechas-anomalas"
+@using ExistenciasReset.Models
+
+<PageTitle>Diagnóstico Fechas Anómalas</PageTitle>
+
+<div class="container" style="max-width: 1200px;">
+    <p class="text-muted">
+        Detecta tickets cuya <code>FECHA</code> (y <code>HORA</code>) quedaron con un día distinto al real
+        — el síntoma es que un ticket cobrado un día aparece archivado en otra fecha, no sale en Consulta
+        Ventas de ese día y puede reaparecer en Pedidos x Recuperar. El campo <code>FECHA2</code> se graba
+        junto con <code>FECHA</code> al crear el ticket y, en estos casos, conserva la fecha real —
+        se usa aquí para restaurarla.
+    </p>
+
+    <div class="mb-3">
+        <label class="form-label" for="tenantSelect">Sistema</label>
+        <select id="tenantSelect" class="form-select" value="@SelectedTenantId" disabled="@IsFixing"
+                @onchange="OnTenantChanged">
+            <option value="">-- Selecciona un sistema --</option>
+            @foreach (var tenant in ActiveTenants)
+            {
+                <option value="@tenant.Id">@tenant.Name (@tenant.Id)</option>
+            }
+        </select>
+    </div>
+
+    @if (SelectedTenant is not null)
+    {
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <h2 class="h6 mb-0">Diagnóstico en vivo</h2>
+            <button class="btn btn-sm btn-outline-secondary" disabled="@IsDiagnosing" @onclick="LoadDiagnosticsAsync">
+                @if (IsDiagnosing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+        </div>
+
+        @if (Diagnostics is not null && Diagnostics.ErrorMessage != string.Empty)
+        {
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle-fill me-2"></i>
+                No se pudo diagnosticar este sistema: @Diagnostics.ErrorMessage
+            </div>
+        }
+        else if (Diagnostics is not null)
+        {
+            @if (LastFixResult is not null)
+            {
+                <div class="alert @(LastFixResult.Success ? "alert-success" : "alert-danger")">
+                    @if (LastFixResult.Success)
+                    {
+                        <i class="bi bi-check-circle-fill me-2"></i>
+                    }
+                    else
+                    {
+                        <i class="bi bi-x-circle-fill me-2"></i>
+                    }
+                    @LastFixResult.Message
+                </div>
+            }
+
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h3 class="h6 mb-0">Tickets con fecha corrida</h3>
+                        <span class="badge @(Diagnostics.TotalAnomalias > 0 ? "bg-danger" : "bg-success") rounded-pill">
+                            @Diagnostics.TotalAnomalias caso(s)
+                        </span>
+                    </div>
+
+                    @if (Diagnostics.TotalAnomalias == 0)
+                    {
+                        <p class="text-success small mb-0"><i class="bi bi-check-circle-fill me-1"></i>Sin casos detectados.</p>
+                    }
+                    else
+                    {
+                        <p class="text-muted small">
+                            Rango histórico: @FormatFechaStr(Diagnostics.FechaMasAntigua) — @FormatFechaStr(Diagnostics.FechaMasReciente).
+                            Mostrando los @Diagnostics.Muestra.Count más recientes de @Diagnostics.TotalAnomalias totales.
+                        </p>
+
+                        <div class="table-responsive mb-3" style="max-height: 420px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Folio</th>
+                                        <th>Fecha actual (mal)</th>
+                                        <th>Fecha corregida</th>
+                                        <th>Días de diferencia</th>
+                                        <th>Usuario</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var issue in Diagnostics.Muestra)
+                                    {
+                                        <tr>
+                                            <td>@issue.Folio</td>
+                                            <td class="text-danger text-nowrap">@FormatFechaStr(issue.FechaStrActual)</td>
+                                            <td class="text-success text-nowrap">@FormatFechaStr(issue.FechaStrCorregida)</td>
+                                            <td>@issue.DiasDiferencia</td>
+                                            <td>@issue.Usuario</td>
+                                            <td>@issue.Total</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if (PendingFix)
+                        {
+                            <div class="alert alert-danger">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                Vas a corregir <strong>@Diagnostics.TotalAnomalias</strong> ticket(s) en total (no solo los
+                                que se ven arriba): se les va a restaurar <code>FECHA</code> y <code>HORA</code> usando
+                                <code>FECHA2</code> (se conserva la hora del día, solo se corrige la fecha). Esto escribe
+                                directo en producción y no se puede deshacer.
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-danger me-2" disabled="@IsFixing" @onclick="ConfirmFixAsync">
+                                        @if (IsFixing)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                        }
+                                        Sí, corregir los @Diagnostics.TotalAnomalias tickets
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" disabled="@IsFixing" @onclick="CancelFix">Cancelar</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" @onclick="RequestFix">
+                                <i class="bi bi-calendar-check-fill me-1"></i>Corregir los @Diagnostics.TotalAnomalias ticket(s)
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle-fill me-2"></i>
+                Esto corrige lo ya capturado. No sabemos con certeza qué paso de NiuX pisa <code>FECHA</code>/<code>HORA</code>
+                sin tocar <code>FECHA2</code> (todo apunta a la recuperación de pedidos viejos) — revisa esta pantalla
+                periódicamente para atrapar casos nuevos.
+            </div>
+        }
+    }
+</div>
