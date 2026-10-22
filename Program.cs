@@ -13,7 +13,6 @@ builder.Services.AddSingleton<IReadOnlyList<TenantOptions>>(tenants);
 builder.Services.AddScoped<FirebirdMonitoringService>();
 builder.Services.AddScoped<ExistenciasResetService>();
 builder.Services.AddScoped<CargaOrdenService>();
-builder.Services.AddScoped<FechaAnomaliaService>();
 builder.Services.AddScoped<FechasCortesService>();
 
 var app = builder.Build();
